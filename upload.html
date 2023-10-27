@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Upload Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        #top {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #drop-area {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            cursor: pointer;
+        }
+        #file-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+        }
+        #file-content {
+            margin-top: 20px;
+            border: 1px solid #ccc;
+            padding: 10px;
+            white-space: pre-wrap;
+            text-align: left;
+            overflow-y: scroll;
+        }
+        .highlight {
+            background-color: lightgrey;
+        }
+        .button-container {
+            display: flex;
+            gap: 20px;
+        }
+
+        .styled-button {
+            display: inline-block;
+            padding: 10px 20px;
+            font-size: 18px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: transform 0.3s ease;
+        }
+
+        .styled-button:hover {
+            background-color: #45a049;
+        }
+
+        .styled-button:active {
+            transform: scale(1.1);
+        }
+
+  </style>
+
+</head>
+<body>
+    <div id="top">
+        <div class="button-container">
+            <a id="to_network" class="styled-button">To Network</a>
+            <a id="to_machine" class="styled-button">To Machine</a>
+            <a id="save_file" class="styled-button">Save File</a>
+        </div>
+    </div>
+
+    <div id="drop-area">
+        <p>Drag and drop files here or click to select files.</p>
+        <input type="file" id="fileInput">
+    </div>
+
+    <div id="file-list">
+        <p><strong>Uploaded Files:</strong></p>
+        <!-- File list will be displayed here -->
+    </div>
+
+    <div id="file-content">
+
+    </div>
+
+
+<script>
+  var ncData = "test";
+  var fileOut =  'prog.nc'; // Initial save file name.
+  var dataHold = 0;
+  var sendLong = 0;
+  var receiveMode = 0;
+  var percents = 0; //count openning and closing percent signs.
+  var uploadData = "";
+
+  var gateway = `ws://${window.location.hostname}/ws`;
+  var websocket;
+  window.addEventListener('load', onLoad);
+  function initWebSocket() {
+    console.log('Trying to open a WebSocket connection...');
+    websocket = new WebSocket(gateway);
+    websocket.onopen    = onOpen;
+    websocket.onclose   = onClose;
+    websocket.onmessage = onMessage; // <-- add this line
+  }
+  function onOpen(event) {
+    console.log('Connection opened');
+  }
+  function onClose(event) {
+    console.log('Connection closed');
+    setTimeout(initWebSocket, 2000);
+  }
+  function onMessage(event) {
+    if (receiveMode == 0){
+        if (event.data == "1"){
+            dataHold = 1;
+        }
+        if (event.data == "0"){
+            dataHold = 0;
+            if (sendLong == 1){
+                sendNext();
+            }
+        }
+    } else {
+        if (event.data.includes("%")){
+            percents += 1;
+        }
+        uploadData += event.data;
+        if (percents == 2){
+            percents = 0;
+            uploadData = uploadData.replace(/\u000A\u000A|\u000D\u000D/g, "");
+            var regex = /%((?:\\.|[^%\\])*)%/;
+            uploadData = regex.exec(uploadData)[0].toString();
+            console.log(uploadData);
+            document.getElementById('file-content').innerText = uploadData;
+            const pattern = /[O:](\d{4})/;
+            const match = uploadData.match(pattern);
+            const extractedNumber = match ? match[1] : "0000";
+            fileOut = "O" + extractedNumber + ".nc";
+        }
+    }
+  }
+
+  function onLoad(event) {
+    initWebSocket();
+    initButton();
+  }
+  function initButton() {
+    document.getElementById('to_network').addEventListener('click', loadNetwork);
+    document.getElementById('to_machine').addEventListener('click', loadMachine);
+    document.getElementById('save_file').addEventListener('click', handlerDownloadInnerHtml);
+    document.getElementById('save_file').style.display = 'none';
+  }
+  //This is where the data is sent from the webpage to the ESP32.
+
+    function loadMachine(){
+      ncDataStart = 0;
+      sendLong = 0;
+      receiveMode = 0;
+      document.getElementById('save_file').style.display = 'none';
+      var ncDataLen = ncData.length;
+      if (ncDataLen < 1024) {
+        websocket.send(ncData);
+      } else {
+        sendLong = 1;
+        sendNext();
+      }
+    }
+
+    var ncDataStart = 0;
+
+    function sendNext(){
+      var start = ncDataStart;
+      var inc = 1024;
+      if ((ncDataStart + inc) <  ncData.length){
+        websocket.send(ncData.slice(ncDataStart, ncDataStart + inc));
+        ncDataStart += inc;
+      } else {
+        websocket.send(ncData.slice(ncDataStart, ncData.length));
+        sendLong = 0;
+      }
+    }
+
+    function loadNetwork(){
+        document.getElementById('file-content').innerHTML = '';
+        receiveMode = 1;
+        document.getElementById('save_file').style.display = 'inline-block';
+    }
+
+  const dropArea = document.getElementById('drop-area');
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('file-list');
+        const fileContent = document.getElementById('file-content');
+
+        // Prevent default drag behaviors
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
+
+        // Highlight drop area when dragging over
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, highlight, false);
+        });
+
+        // Unhighlight drop area when leaving
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, unhighlight, false);
+        });
+
+        // Handle dropped files
+        dropArea.addEventListener('drop', handleDrop, false);
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        function highlight() {
+            dropArea.classList.add('highlight');
+        }
+
+        function unhighlight() {
+            dropArea.classList.remove('highlight');
+        }
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+
+            handleFiles(files);
+        }
+
+        function handleFiles(files) {
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const fileName = file.name;
+                fileList.innerHTML = "<p><strong>Uploaded Files:</strong></p>";
+                // Display the file name in the list
+                const listItem = document.createElement('div');
+                listItem.textContent = fileName;
+                fileList.appendChild(listItem);
+
+                // Read the file content and display it
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    fileContent.textContent = e.target.result + "%";
+                    // data to be sent via rs232.
+                    ncData = e.target.result + "%";
+                    ncData = ncData.toUpperCase();
+                };
+                reader.readAsText(file);
+            }
+        }
+
+        // Trigger file input when clicking on the drop area
+        dropArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // Handle selected files through the file input
+        fileInput.addEventListener('change', () => {
+            const files = fileInput.files;
+            handleFiles(files);
+        });
+
+function downloadInnerHtml(fileOut, elId, mimeType) {
+    var elHtml = uploadData;
+    uploadData = "";
+    var link = document.createElement('a');
+    mimeType = mimeType || 'text/plain';
+
+    link.setAttribute('download', fileOut);
+    link.setAttribute('href', 'data:' + mimeType + ';charset=utf-8,' + encodeURIComponent(elHtml));
+    link.click();
+}
+
+function handlerDownloadInnerHtml() {
+    downloadInnerHtml(fileOut, 'file-content','text/html');
+}
+</script>
+</body>
+</html>
